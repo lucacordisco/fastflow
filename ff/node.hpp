@@ -48,6 +48,10 @@
 #include <ff/barrier.hpp>
 #include <atomic>
 
+#ifdef USE_CPP_THREADS
+#include <thread>
+#endif
+
 #ifdef DFF_ENABLED
 
 #include <ff/distributed/ff_network.hpp>
@@ -121,6 +125,21 @@ static std::atomic_ulong   internal_threadCounter_noBarrier{MAX_NUM_THREADS};
 // TODO: Should be rewritten in terms of mapping_utils.hpp 
 #if defined(HAVE_PTHREAD_SETAFFINITY_NP) && !defined(NO_DEFAULT_MAPPING)
 
+static inline int get_cpuset(int cpuId, cpu_set_t* cpuset) {
+    // This is linux-specific code
+    CPU_ZERO(cpuset);
+
+    int id;
+    if (cpuId<0) {
+        id = threadMapper::instance()->getCoreId();
+        CPU_SET (id, cpuset);
+    } else  {
+        id = cpuId;
+        CPU_SET (cpuId, cpuset);
+    }
+    return id;
+}
+
     /*
      *
      * \brief Initialize thread affinity 
@@ -135,18 +154,8 @@ static std::atomic_ulong   internal_threadCounter_noBarrier{MAX_NUM_THREADS};
      */
 static inline int init_thread_affinity(pthread_attr_t*attr, int cpuId) {
     // This is linux-specific code
-    cpu_set_t cpuset;    
-    CPU_ZERO(&cpuset);
-
-    int id;
-    if (cpuId<0) {
-        id = threadMapper::instance()->getCoreId();
-        CPU_SET (id, &cpuset);
-    } else  {
-        id = cpuId;
-        CPU_SET (cpuId, &cpuset);
-    }
-
+    cpu_set_t cpuset;
+    int id = get_cpuset(cpuId, &cpuset);
     if (pthread_attr_setaffinity_np (attr, sizeof(cpuset), &cpuset)<0) {
         perror("pthread_attr_setaffinity_np");
         return -2;
@@ -232,7 +241,11 @@ protected:
         }
     }
 
-    virtual ~ff_thread() {}
+    virtual ~ff_thread() {
+#ifdef USE_CPP_THREADS
+        delete th_handle;
+#endif
+    }
     
     void thread_routine() {
         threadid = ff_getThreadID();
@@ -334,6 +347,9 @@ public:
     virtual int spawn(int cpuId=-1) {
         if (spawned) return -1;
 
+        int CPUId = -1;
+
+#ifndef USE_CPP_THREADS
         if ((attr = (pthread_attr_t*)malloc(sizeof(pthread_attr_t))) == NULL) {
             error("spawn: pthread can not be created, malloc failed\n");
             return -1;
@@ -343,9 +359,10 @@ public:
                 return -1;
         }
 
-        int CPUId = -1;
         if (default_mapping)
             init_thread_affinity(attr, cpuId);
+#endif
+
         if (CPUId==-2) return -2;
 
         if (barrier)
@@ -353,13 +370,23 @@ public:
         else
             tid= internal_threadCounter_noBarrier.fetch_add(1);
         int r=0;
+
+#ifndef USE_CPP_THREADS
         if ((r=pthread_create(&th_handle, attr,
                               proxy_thread_routine, this)) != 0) {
-            errno=r;
+            errno = r;
             perror("pthread_create: pthread creation failed.");
-            barrier?--internal_threadCounter:--internal_threadCounter_noBarrier;
+            barrier ? --internal_threadCounter : --internal_threadCounter_noBarrier;
             return -2;
         }
+#else
+        th_handle = new std::thread(proxy_thread_routine, this);
+#if defined(HAVE_PTHREAD_SETAFFINITY_NP) && !defined(NO_DEFAULT_MAPPING)
+        cpu_set_t cpuset;
+        get_cpuset(cpuId, &cpuset);
+        pthread_setaffinity_np (th_handle->native_handle(), sizeof(cpuset), &cpuset);
+#endif
+#endif
         spawned = true;
         return CPUId;
     }
@@ -372,7 +399,11 @@ public:
             thaw();
         }
         if (spawned) {
+#ifndef USE_CPP_THREADS
             pthread_join(th_handle, NULL);
+#else
+            th_handle->join();
+#endif
             barrier ? --internal_threadCounter: --internal_threadCounter_noBarrier;
         }
         if (attr) {
@@ -425,8 +456,6 @@ public:
     virtual bool isfrozen() const { return freezing>0;} 
     virtual bool done()     const { return isdone || (frozen && !stp);}
 
-    pthread_t get_handle() const { return th_handle;}
-
     inline size_t getTid() const { return tid; }
     inline size_t getOSThreadId() const { return threadid; }
 
@@ -441,7 +470,11 @@ private:
     int             freezing;  
     bool            frozen,isdone;
     bool            init_error;
+#ifndef USE_CPP_THREADS
     pthread_t       th_handle;
+#else
+    std::thread*     th_handle;
+#endif
     pthread_attr_t *attr;
     pthread_mutex_t mutex; 
     pthread_cond_t  cond;
