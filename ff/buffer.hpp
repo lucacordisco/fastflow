@@ -255,7 +255,7 @@ public:
              */
 #ifndef USE_CPP_FENCE
             WMB();
-#elif
+#else
             std::atomic_thread_fence(std::memory_order_release);
 #endif
             buf[pwrite] = data;
