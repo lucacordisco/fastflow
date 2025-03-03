@@ -174,7 +174,6 @@ public:
 #endif
         // getAlignedMemory is a function defined in 'sysdep.h'
         buf=(void**)getAlignedMemory(longxCacheLine*sizeof(long),size*sizeof(void*));
-// std::atomic<void**> asd = buf;
         if (!buf) return false;
 
         reset(startatlineend);
