@@ -94,6 +94,9 @@ endif
 ifdef DEFAULT_BUFFER_CAPACITY
     CXXFLAGS        += -DDEFAULT_BUFFER_CAPACITY=${DEFAULT_BUFFER_CAPACITY}
 endif
+ifdef USE_CPP_THREADS
+    CXXFLAGS        += -DUSE_CPP_THREADS
+endif
 CXXFLAGS            += -DNO_CMAKE_CONFIG -Wall
 INCS                 = -I.. 
 LIBS                 = -pthread
