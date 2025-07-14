@@ -97,6 +97,9 @@ endif
 ifdef USE_CPP_THREADS
     CXXFLAGS        += -DUSE_CPP_THREADS
 endif
+ifdef USE_CPP_FENCE
+    CXXFLAGS        += -DUSE_CPP_FENCE
+endif
 CXXFLAGS            += -DNO_CMAKE_CONFIG -Wall
 INCS                 = -I.. 
 LIBS                 = -pthread
